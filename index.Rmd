@@ -1,0 +1,299 @@
+---
+title: "Economania blog - számokban"
+subtitle: "![](logo.png){ width=30% } \n EHTT - Szakmai est"
+author: "Granát Marcell"
+institute: "Magyar Nemzeti Bank & .blue[Neumann János Egyetem]"
+date: "2022"
+output:
+  xaringan::moon_reader:
+    lib_dir: libs
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+      titleSlideClass: [center, middle]
+  seal: false
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css, echo=FALSE}
+.red { color: red; }
+.blue { color: #378C95; }
+strong { color: red; }
+a { color: #378C95; font-weight: bold; }
+.remark-inline-code { font-weight: 900; background-color: #a7d5e7; }
+.caption { color: #378C95; font-style: italic; text-align: center; }
+
+.content-box { 
+box-sizing: content-box;
+background-color: #378C95;
+/* Total width: 160px + (2 * 20px) + (2 * 8px) = 216px
+Total height: 80px + (2 * 20px) + (2 * 8px) = 136px
+Content box width: 160px
+Content box height: 80px */
+}
+
+.content-box-green {
+background-color: #d9edc2;
+}
+
+.content-box-red {
+background-color: #f9dbdb;
+}
+
+.fullprice {
+text-decoration: line-through;
+}
+```
+
+```{r xaringan-themer, include=FALSE, warning=FALSE}
+library(xaringanthemer)
+library(knitr)
+library(emo)
+library(magrittr)
+library(tidyverse)
+library(granatlib)
+library(quanteda)
+library(tidytext)
+library(ggwordcloud)
+
+style_mono_accent(
+  base_color = "#DC322F",               # bright red
+  inverse_background_color = "#002B36", # dark dark blue
+  inverse_header_color = "#378C95",     # light aqua green
+  inverse_text_color = "#FFFFFF",       # white
+  title_slide_background_color = "var(--base)",
+  text_font_google = google_font("Kelly Slab"),
+  header_font_google = google_font("Oleo Script")
+)
+
+xaringanExtra::use_panelset()
+xaringanExtra::html_dependency_clipboard()
+xaringanExtra::html_dependency_scribble(pen_color = "#378C95", 3, 4)
+xaringanExtra::use_tile_view()
+
+theme_set(
+  theme_bw() + 
+    theme(
+      axis.text = element_text(size = 20),
+      axis.title = element_text(size = 24),
+      strip.text = element_text(size = 20)
+    )
+)
+```
+
+```{r setup, include=FALSE}
+options(htmltools.dir.version = FALSE)
+knitr::opts_chunk$set(echo = FALSE,
+                      fig.align = "center", 
+                      error = TRUE,
+                      message = F,
+                      out.width = "700px",
+                      fig.width = 7,
+                      fig.height = 4.5, 
+                      out.height = "450px",
+                      dpi = 400,
+                      warning = FALSE)
+```
+
+```{r}
+load(".RData")
+set.seed(123)
+
+dotdot_table <- . %>% 
+  mutate_all(as.character) %>% 
+  mutate_all(function(x) c(head(x, -1), "...")) %>% 
+  knitr::kable(align = rep("c", 10))
+```
+
+
+# A blogon megjelent cikkek számának alakulása
+
+```{r}
+p <- economania_df %>% 
+  count(time) %>% 
+  arrange(time) %>% 
+  mutate(n = cumsum(n)) %>% 
+  ggplot() + 
+  aes(time, n) + 
+  geom_line(size = 1.7) + 
+  labs(x = NULL, y = "Posztok száma")
+
+p
+```
+
+---
+
+# A blogon megjelent cikkek számának alakulása
+
+```{r}
+p + geom_vline(xintercept = as.Date(str_c(2019:2022, "-01-01")), lty = 2, color = "red3")
+```
+
+```{r}
+words_df <- economania_df %>% 
+  filter(lang == "hungarian") %>% 
+  arrange(time) %>% 
+  corpus() %>% 
+  tokens(
+    remove_punct = TRUE,
+    remove_symbols = TRUE,
+    remove_numbers = TRUE
+  ) %>% 
+  tokens_tolower() %>% 
+  tokens_remove(pattern = stopwords("hungarian")) %>% 
+  tokens_wordstem(language = "hungarian") %>% 
+  imap_dfr(~ tibble(word = .x, id = .y)) %>% 
+  group_by(id) %>% 
+  nest() %>% 
+  ungroup() %>% 
+  select(words = data) %>% 
+  bind_cols(
+    economania_df %>% 
+      filter(lang == "hungarian") %>% 
+      arrange(time),
+    .
+  )
+```
+
+---
+
+class: middle, center
+
+# TF-IDF
+
+TF: hányszor fordul elő a kifejezés az adott dokumentumban
+
+$$\text{IDF}=\ln \left(\frac{n_{\text {dokumentumok }}}{n_{\text {dokumentumok, amelyek tartalmazzák }}}\right)$$
+
+$$\text{TF-IDF} = \text{TF} \times \text{IDF}$$
+
+--
+.content-box-green[
+Ez a módszer olyan szavakat fog azonosítani, amely az adott dokumentumban gyakran szerepel, de nem szerepel máshol.
+]
+
+---
+
+# TF-IDF évenként
+
+```{r}
+words_raw_df <- economania_df %>% 
+  transmute(author, year = lubridate::year(time), text) %>% 
+  unnest_tokens(output = "words", input = text)
+```
+
+```{r}
+reverse_stem <- function(x, cond) {
+  words_raw_df %>% 
+    filter(author == cond | year == cond) %>% 
+    filter(str_starts(str_to_lower(words), x)) %>% 
+    count(words, sort = TRUE) %>% 
+    pull(words) %>% 
+    first()
+}
+```
+
+
+```{r}
+set.seed(1234)
+
+tfidf_df <- words_df %>% 
+  mutate(
+    year = lubridate::year(time)
+  ) %>% 
+  select(year, words) %>% 
+  unnest(words) %>% 
+  count(year, word) %>% 
+  ungroup() %>% 
+  filter(!(word %in% stopwords::stopwords("hungarian"))) %>% 
+  filter(str_detect(word, "x", negate = T)) %>% 
+  filter(str_length(word) > 2) %>% 
+  bind_tf_idf(term = word, document = year, n = n) %>% 
+  arrange(desc(tf_idf)) %>% 
+  group_by(year) %>% 
+  filter(n > 10) %>% 
+  slice_max(tf_idf, n = 10) %>% 
+  mutate(word = map2_chr(year, word, ~ reverse_stem(.y, .x))) %>% 
+  distinct(year, word, .keep_all = T) %>% 
+  filter(year != 2017 | row_number() < 8) %>% 
+  filter(year != 2018 | row_number() < 8) %>% 
+  filter(year != 2019 | row_number() < 9) %>% 
+  filter(year != 2020 | row_number() < 8) 
+```
+
+```{r}
+tfidf_df %>% 
+  ggplot(aes(label = word)) +
+  geom_text_wordcloud() + 
+  facet_wrap(~ year) + 
+  theme_bw()
+```
+
+---
+
+# Legtöbbet publikált szerzőink
+
+```{r}
+economania_df %>% 
+  count(author_cleaned, sort = TRUE) %>% 
+  mutate(p = scales::percent(n / sum(n))) %>% 
+  head(10) %>% 
+  set_names("Szerző", "# cikk", "%") %>% 
+  dotdot_table()
+```
+
+
+---
+
+# TF-IDF szerzőnként
+
+```{r out.width = "730px",fig.width = 7.3, fig.height = 5, out.height = "500px",}
+set.seed(12)
+
+words_df %>% 
+  mutate(
+    year = lubridate::year(time)
+  ) %>% 
+  group_by(author) %>% 
+  mutate(author = fct_lump(author, n = 10)) %>% 
+  filter(author != "other", author != "X") %>% 
+  select(author, words) %>% 
+  unnest(words) %>% 
+  count(author, word) %>% 
+  ungroup() %>% 
+  filter(!(word %in% stopwords::stopwords("hungarian"))) %>% 
+  filter(str_detect(word, "x", negate = T)) %>% 
+  filter(str_length(word) > 2) %>% 
+  bind_tf_idf(term = word, document = author, n = n) %>% 
+  arrange(desc(tf_idf)) %>% 
+  group_by(author) %>% 
+  filter(n > 10) %>% 
+  slice_max(tf_idf, n = 7) %>% 
+  mutate(word = map2_chr(author, word, ~ reverse_stem(.y, .x))) %>% 
+  distinct(author, word, .keep_all = T) %>% 
+  filter(author != "Baranyai Eszter" | row_number() < 6) %>%
+  filter(author != "Kutasi Gábor" | row_number() < 6) %>% 
+  ggplot(aes(label = word)) +
+  geom_text_wordcloud(max_steps = 50, size = 3) + 
+  facet_wrap(~ author) + 
+  theme_bw()
+```
+
+---
+
+# Akiknek ez tetszett, szintén megnézték...
+
+```{r, print_refs, results='asis', echo=FALSE, warning=FALSE, message=FALSE}
+library(RefManageR)
+bib <- ReadBib("./references.bib", check = FALSE)
+
+print(bib, 
+      .opts = list(check.entries = FALSE, 
+                   style = "html", 
+                   bib.style = "authoryear"))
+```
+
+
+
