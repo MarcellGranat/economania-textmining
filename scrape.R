@@ -82,6 +82,7 @@ x_authors <- c("Granát Marcell",
 
 economania_df <- economania_raw_df %>% 
   select(-p) %>% 
+  distinct(article_links, .keep_all = TRUE) %>% 
   mutate(
     author_cleaned = map2_chr(author, text, find_author),
     text = map(text, setdiff, y = "Economania blog"),
@@ -97,4 +98,4 @@ economania_df <- economania_raw_df %>%
     time = lubridate::ymd(time)
   )
 
-
+save(economania_df, file = ".RData")
