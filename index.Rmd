@@ -107,30 +107,6 @@ dotdot_table <- . %>%
   knitr::kable(align = rep("c", 10))
 ```
 
-
-# A blogon megjelent cikkek számának alakulása
-
-```{r}
-p <- economania_df %>% 
-  count(time) %>% 
-  arrange(time) %>% 
-  mutate(n = cumsum(n)) %>% 
-  ggplot() + 
-  aes(time, n) + 
-  geom_line(size = 1.7) + 
-  labs(x = NULL, y = "Posztok száma")
-
-p
-```
-
----
-
-# A blogon megjelent cikkek számának alakulása
-
-```{r}
-p + geom_vline(xintercept = as.Date(str_c(2019:2022, "-01-01")), lty = 2, color = "red3")
-```
-
 ```{r}
 words_df <- economania_df %>% 
   filter(lang == "hungarian") %>% 
@@ -156,6 +132,79 @@ words_df <- economania_df %>%
     .
   )
 ```
+
+```{r}
+words_raw_df <- economania_df %>% 
+  transmute(author, year = lubridate::year(time), text) %>% 
+  unnest_tokens(output = "words", input = text)
+```
+
+```{r}
+reverse_stem <- function(x, cond = rep(TRUE, n())) {
+  words_raw_df %>% 
+    filter(cond) %>% 
+    filter(str_starts(str_to_lower(words), x)) %>% 
+    count(words, sort = TRUE) %>% 
+    pull(words) %>% 
+    first()
+}
+```
+
+```{r}
+additional_stopwords <- c("során", "mint", "fenti", "ismert",
+                          "sok", "például", "kérdés", "alapján",
+                          "második", "más", "végül", "később",
+                          "túl", "képest", "fog", "stb", "való",
+                          "mindez", "tűnik", "azaz", "további", "mely",
+                          "igaz", "egy")
+```
+
+## A blog leggyakoribb kifejezései
+
+```{r fig.height=3.2, fig.width=5}
+words_df %>% 
+  select(words) %>% 
+  unnest(words) %>% 
+  count(word) %>% 
+  filter(!str_detect(word, "\\d|[-#]")) %>% 
+  filter(str_length(word) > 2) %>% 
+  slice_max(n, n = 200) %>%  
+  mutate(
+    word = str_replace(word, "százale", "százalék"),
+    word = map_chr(word, reverse_stem),
+    # n = exp(n)
+  ) %>% 
+  filter(!(word %in% additional_stopwords)) %$% 
+  ggwordcloud(word, n, scale = c(2, .5), min.freq = 3, random.color = TRUE,
+              colors = c("black", "#378C95"), rot.per=0.35)
+```
+
+
+---
+
+# A blogon megjelent cikkek számának alakulása
+
+```{r}
+p <- economania_df %>% 
+  count(time) %>% 
+  arrange(time) %>% 
+  mutate(n = cumsum(n)) %>% 
+  ggplot() + 
+  aes(time, n) + 
+  geom_line(size = 1.7) + 
+  labs(x = NULL, y = "Posztok száma")
+
+p
+```
+
+---
+
+# A blogon megjelent cikkek számának alakulása
+
+```{r}
+p + geom_vline(xintercept = as.Date(str_c(2019:2022, "-01-01")), lty = 2, color = "red3")
+```
+
 
 ---
 
@@ -244,6 +293,43 @@ economania_df %>%
   dotdot_table()
 ```
 
+
+---
+
+# Leggyakoribb szavak szerzőnként
+
+```{r out.width = "730px",fig.width = 7.3, fig.height = 5, out.height = "500px",}
+set.seed(12)
+
+words_df %>% 
+  mutate(
+    year = lubridate::year(time)
+  ) %>% 
+  group_by(author) %>% 
+  mutate(author = fct_lump(author, n = 10)) %>% 
+  filter(author != "other", author != "X") %>% 
+  select(author, words) %>% 
+  unnest(words) %>% 
+  count(author, word) %>% 
+  ungroup() %>% 
+  filter(!(word %in% stopwords::stopwords("hungarian"))) %>% 
+  filter(str_detect(word, "x", negate = T)) %>% 
+  filter(str_length(word) > 2) %>% 
+  bind_tf_idf(term = word, document = author, n = n) %>% 
+  arrange(desc(tf_idf)) %>% 
+  group_by(author) %>% 
+  # filter(n > 10) %>% 
+  slice_max(n, n = 7) %>% 
+  mutate(word = map2_chr(author, word, ~ reverse_stem(.y, .x))) %>% 
+  distinct(author, word, .keep_all = T) %>% 
+  filter(!(word %in% additional_stopwords)) %>% 
+  # filter(author != "Baranyai Eszter" | row_number() < 6) %>%
+  # filter(author != "Kutasi Gábor" | row_number() < 6) %>% 
+  ggplot(aes(label = word)) +
+  geom_text_wordcloud(max_steps = 50, size = 3) + 
+  facet_wrap(~ author) + 
+  theme_bw()
+```
 
 ---
 
